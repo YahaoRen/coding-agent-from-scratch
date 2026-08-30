@@ -33,13 +33,23 @@ class Workspace:
         """Resolve a relative path and reject every route outside the root."""
 
         normalized = self._validate_path_text(relative_path)
+        unresolved_target = self._root / normalized
         try:
-            target = (self._root / normalized).resolve(strict=must_exist)
+            target = unresolved_target.resolve(strict=False)
+            self._ensure_inside(target)
+            if must_exist:
+                target = unresolved_target.resolve(strict=True)
         except FileNotFoundError as error:
             raise WorkspaceError("NOT_FOUND", f"Path not found: {relative_path}") from error
+        except WorkspaceError:
+            raise
         except (OSError, RuntimeError) as error:
             raise WorkspaceError("INVALID_PATH", f"Invalid path: {relative_path}") from error
 
+        self._ensure_inside(target)
+        return target
+
+    def _ensure_inside(self, target: Path) -> None:
         try:
             target.relative_to(self._root)
         except ValueError as error:
@@ -47,7 +57,6 @@ class Workspace:
                 "OUTSIDE_WORKSPACE",
                 "Path must stay inside the workspace",
             ) from error
-        return target
 
     def resolve_file(self, relative_path: str) -> Path:
         target = self.resolve(relative_path)
