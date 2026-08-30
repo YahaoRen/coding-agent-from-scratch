@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from coding_agent.domain import Message
+from coding_agent.domain import Message, ToolCall
 from coding_agent.model import ModelClient, ModelError
 from coding_agent.policy import ApprovalPolicy, DenySideEffectsPolicy
 from coding_agent.prompt import SYSTEM_PROMPT
@@ -20,6 +21,25 @@ class AgentStatus(str, Enum):
     MAX_TOOL_CALLS = "max_tool_calls"
     MODEL_ERROR = "model_error"
     PROTOCOL_ERROR = "protocol_error"
+
+
+class AgentEventKind(str, Enum):
+    """Small progress events a CLI may render without owning the loop."""
+
+    MODEL_REQUEST = "model_request"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+
+
+@dataclass(frozen=True)
+class AgentEvent:
+    kind: AgentEventKind
+    step: int
+    call: ToolCall | None = None
+    result: ToolResult | None = None
+
+
+AgentObserver = Callable[[AgentEvent], None]
 
 
 @dataclass(frozen=True)
@@ -59,6 +79,7 @@ class Agent:
         limits: AgentLimits | None = None,
         system_prompt: str = SYSTEM_PROMPT,
         approval_policy: ApprovalPolicy | None = None,
+        observer: AgentObserver | None = None,
     ) -> None:
         if not system_prompt.strip():
             raise ValueError("system_prompt cannot be empty")
@@ -67,6 +88,7 @@ class Agent:
         self._limits = limits or AgentLimits()
         self._system_prompt = system_prompt
         self._approval_policy = approval_policy or DenySideEffectsPolicy()
+        self._observer = observer
 
     def run(self, task: str) -> AgentResult:
         """Run until the model answers, an error occurs, or a limit is reached."""
@@ -81,6 +103,7 @@ class Agent:
         tool_call_count = 0
 
         for step in range(1, self._limits.max_steps + 1):
+            self._emit(AgentEvent(kind=AgentEventKind.MODEL_REQUEST, step=step))
             try:
                 turn = self._model.complete(history, self._tools.schemas())
             except ModelError as error:
@@ -147,7 +170,22 @@ class Agent:
                 )
 
             for call in assistant.tool_calls:
+                self._emit(
+                    AgentEvent(
+                        kind=AgentEventKind.TOOL_CALL,
+                        step=step,
+                        call=call,
+                    )
+                )
                 result = self._tools.execute(call, self._approval_policy)
+                self._emit(
+                    AgentEvent(
+                        kind=AgentEventKind.TOOL_RESULT,
+                        step=step,
+                        call=call,
+                        result=result,
+                    )
+                )
                 history.append(
                     Message(
                         role="tool",
@@ -165,3 +203,12 @@ class Agent:
             tool_calls=tool_call_count,
             error="Maximum model-step count reached",
         )
+
+    def _emit(self, event: AgentEvent) -> None:
+        if self._observer is None:
+            return
+        try:
+            self._observer(event)
+        except Exception:
+            # Rendering progress must never change the agent's behavior.
+            pass

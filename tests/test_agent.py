@@ -7,7 +7,7 @@ import unittest
 from collections.abc import Mapping
 from typing import Any
 
-from coding_agent.agent import Agent, AgentLimits, AgentStatus
+from coding_agent.agent import Agent, AgentEventKind, AgentLimits, AgentStatus
 from coding_agent.domain import Message, ModelTurn, ToolCall
 from coding_agent.model import ModelConnectionError
 from coding_agent.tools import Tool, ToolRegistry, ToolResult
@@ -153,6 +153,28 @@ class AgentLoopTests(unittest.TestCase):
     def test_empty_task_is_rejected_before_model_call(self) -> None:
         with self.assertRaisesRegex(ValueError, "task cannot be empty"):
             Agent(ScriptedModel([]), ToolRegistry()).run("  ")
+
+    def test_observer_receives_model_and_tool_progress(self) -> None:
+        events = []
+        call = ToolCall("call_1", "echo", '{"text":"hello"}')
+        model = ScriptedModel([assistant(None, call), assistant("Done")])
+
+        result = Agent(
+            model,
+            ToolRegistry((echo_tool(),)),
+            observer=events.append,
+        ).run("Echo hello")
+
+        self.assertEqual(result.status, AgentStatus.COMPLETED)
+        self.assertEqual(
+            [event.kind for event in events],
+            [
+                AgentEventKind.MODEL_REQUEST,
+                AgentEventKind.TOOL_CALL,
+                AgentEventKind.TOOL_RESULT,
+                AgentEventKind.MODEL_REQUEST,
+            ],
+        )
 
 
 if __name__ == "__main__":

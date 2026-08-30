@@ -28,6 +28,8 @@
 ```powershell
 python -m coding_agent --help
 python -m coding_agent --version
+python -m coding_agent doctor
+python -m coding_agent run "修复当前项目中的失败测试" --workspace .
 ```
 
 运行测试：
@@ -47,6 +49,8 @@ CODING_AGENT_MODEL=模型名称
 ```
 
 `.env` 已被 Git 忽略，真实密钥不得写进其他代码、文档或提交历史。模型适配器使用普通的 `/chat/completions` 接口；工具定义和 Agent 循环均由本项目自行实现。
+
+默认情况下，只读工具自动运行，写入和命令逐次询问。仅在隔离或完全可信的工作区中使用 `--yes` 自动批准。
 
 ## 开发路线
 
