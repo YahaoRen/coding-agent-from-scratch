@@ -19,6 +19,7 @@ from coding_agent.agent import (
 )
 from coding_agent.config import ConfigurationError, Settings
 from coding_agent.context import ContextLimits, ContextWindow
+from coding_agent.model import RetryPolicy, RetryingModelClient
 from coding_agent.policy import (
     AllowAllPolicy,
     CallbackApprovalPolicy,
@@ -82,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Conservative total context character budget (default: 120000).",
     )
     run.add_argument(
+        "--model-retries",
+        type=int,
+        default=2,
+        help="Retries for transient model failures (default: 2; maximum: 5).",
+    )
+    run.add_argument(
         "--yes",
         action="store_true",
         help="Automatically approve every write and command (trusted workspaces only).",
@@ -130,6 +137,7 @@ def _run(arguments: argparse.Namespace) -> int:
         context_window = ContextWindow(
             ContextLimits(max_characters=arguments.context_characters)
         )
+        retry_policy = RetryPolicy(max_attempts=arguments.model_retries + 1)
     except (ConfigurationError, WorkspaceError, ValueError) as error:
         print(f"Setup error: {error}", file=sys.stderr)
         return 2
@@ -145,8 +153,12 @@ def _run(arguments: argparse.Namespace) -> int:
     else:
         approval_policy = CallbackApprovalPolicy(_prompt_for_approval)
 
-    agent = Agent(
+    model = RetryingModelClient(
         OpenAICompatibleClient(settings),
+        retry_policy,
+    )
+    agent = Agent(
+        model,
         tools,
         limits=limits,
         approval_policy=approval_policy,
