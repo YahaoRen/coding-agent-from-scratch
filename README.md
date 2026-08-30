@@ -40,6 +40,8 @@ python -m coding_agent run "修复当前项目中的失败测试" --workspace .
 python -m unittest discover -s tests -v
 ```
 
+测试套件包含一个完全离线的端到端任务：本地假模型通过正式 HTTP 接口驱动 CLI，读取含 Bug 的项目、修改代码并运行测试直至成功。
+
 ## 模型配置
 
 复制 `.env.example` 为 `.env`，填写以下本地配置：
