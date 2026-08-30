@@ -26,6 +26,7 @@ from coding_agent.policy import (
     ToolRisk,
 )
 from coding_agent.providers.openai_compatible import OpenAICompatibleClient
+from coding_agent.session import SessionStore
 from coding_agent.tools import (
     ToolRegistry,
     create_command_tool,
@@ -92,6 +93,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--yes",
         action="store_true",
         help="Automatically approve every write and command (trusted workspaces only).",
+    )
+    run.add_argument(
+        "--save-session",
+        nargs="?",
+        type=Path,
+        const=Path(".coding-agent/sessions"),
+        default=None,
+        metavar="DIRECTORY",
+        help="Save a redacted JSONL transcript, optionally choosing its directory.",
     )
     return parser
 
@@ -170,6 +180,16 @@ def _run(arguments: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print("\nCancelled by user.", file=sys.stderr)
         return 130
+
+    if arguments.save_session is not None:
+        try:
+            session_path = SessionStore(
+                arguments.save_session,
+                secrets=(settings.api_key,),
+            ).save(result)
+            print(f"\nSession saved: {session_path}")
+        except OSError as error:
+            print(f"\nWarning: could not save session: {error}", file=sys.stderr)
 
     if result.status is AgentStatus.COMPLETED:
         print("\nCompleted:\n")

@@ -53,6 +53,7 @@ CODING_AGENT_MODEL=模型名称
 `.env` 已被 Git 忽略，真实密钥不得写进其他代码、文档或提交历史。模型适配器使用普通的 `/chat/completions` 接口；工具定义和 Agent 循环均由本项目自行实现。
 
 默认情况下，只读工具自动运行，写入和命令逐次询问。仅在隔离或完全可信的工作区中使用 `--yes` 自动批准。
+需要调试完整对话时可添加 `--save-session`；脱敏后的 JSONL 会写入本地 `.coding-agent/sessions/`，该目录不会进入 Git。
 
 ## 开发路线
 
