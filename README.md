@@ -4,7 +4,7 @@
 
 ## 当前进度
 
-当前是可运行的项目骨架，提供命令行入口和基础测试。后续功能会以小步、可验证的提交逐步加入。
+当前已提供可运行的命令行入口、环境配置读取，以及不依赖第三方包的 OpenAI 兼容模型客户端。后续功能会以小步、可验证的提交逐步加入。
 
 ## 设计原则
 
@@ -27,6 +27,18 @@ python -m coding_agent --version
 ```powershell
 python -m unittest discover -s tests -v
 ```
+
+## 模型配置
+
+复制 `.env.example` 为 `.env`，填写以下本地配置：
+
+```text
+CODING_AGENT_API_KEY=你的密钥
+CODING_AGENT_BASE_URL=兼容接口的 /v1 地址
+CODING_AGENT_MODEL=模型名称
+```
+
+`.env` 已被 Git 忽略，真实密钥不得写进其他代码、文档或提交历史。模型适配器使用普通的 `/chat/completions` 接口；工具定义和 Agent 循环均由本项目自行实现。
 
 ## 开发路线
 
