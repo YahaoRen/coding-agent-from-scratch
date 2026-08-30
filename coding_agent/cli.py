@@ -18,6 +18,7 @@ from coding_agent.agent import (
     AgentStatus,
 )
 from coding_agent.config import ConfigurationError, Settings
+from coding_agent.context import ContextLimits, ContextWindow
 from coding_agent.policy import (
     AllowAllPolicy,
     CallbackApprovalPolicy,
@@ -75,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-steps", type=int, default=20)
     run.add_argument("--max-tool-calls", type=int, default=50)
     run.add_argument(
+        "--context-characters",
+        type=int,
+        default=120_000,
+        help="Conservative total context character budget (default: 120000).",
+    )
+    run.add_argument(
         "--yes",
         action="store_true",
         help="Automatically approve every write and command (trusted workspaces only).",
@@ -120,6 +127,9 @@ def _run(arguments: argparse.Namespace) -> int:
             max_steps=arguments.max_steps,
             max_tool_calls=arguments.max_tool_calls,
         )
+        context_window = ContextWindow(
+            ContextLimits(max_characters=arguments.context_characters)
+        )
     except (ConfigurationError, WorkspaceError, ValueError) as error:
         print(f"Setup error: {error}", file=sys.stderr)
         return 2
@@ -141,6 +151,7 @@ def _run(arguments: argparse.Namespace) -> int:
         limits=limits,
         approval_policy=approval_policy,
         observer=_print_event,
+        context_window=context_window,
     )
     try:
         result = agent.run(arguments.task)

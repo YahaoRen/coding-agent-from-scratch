@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from coding_agent.agent import Agent, AgentEventKind, AgentLimits, AgentStatus
+from coding_agent.context import ContextLimits, ContextWindow
 from coding_agent.domain import Message, ModelTurn, ToolCall
 from coding_agent.model import ModelConnectionError
 from coding_agent.tools import Tool, ToolRegistry, ToolResult
@@ -175,6 +176,23 @@ class AgentLoopTests(unittest.TestCase):
                 AgentEventKind.MODEL_REQUEST,
             ],
         )
+
+    def test_context_overflow_stops_before_an_invalid_model_request(self) -> None:
+        model = ScriptedModel([])
+
+        result = Agent(
+            model,
+            ToolRegistry(),
+            context_window=ContextWindow(
+                ContextLimits(
+                    max_characters=4_000,
+                    reserved_response_characters=1_000,
+                )
+            ),
+        ).run("x" * 4_000)
+
+        self.assertEqual(result.status, AgentStatus.CONTEXT_ERROR)
+        self.assertEqual(model.requests, [])
 
 
 if __name__ == "__main__":
