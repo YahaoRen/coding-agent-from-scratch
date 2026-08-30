@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from coding_agent.domain import ToolCall
+from coding_agent.policy import ApprovalPolicy, DenySideEffectsPolicy, ToolRisk
 
 
 TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
@@ -94,6 +95,7 @@ class Tool:
     description: str
     parameters: Mapping[str, Any]
     handler: ToolHandler
+    risk: ToolRisk = ToolRisk.READ
 
     def __post_init__(self) -> None:
         if not TOOL_NAME_PATTERN.fullmatch(self.name):
@@ -130,7 +132,11 @@ class ToolRegistry:
     def schemas(self) -> list[dict[str, Any]]:
         return [tool.schema() for tool in self._tools.values()]
 
-    def execute(self, call: ToolCall) -> ToolResult:
+    def execute(
+        self,
+        call: ToolCall,
+        approval_policy: ApprovalPolicy | None = None,
+    ) -> ToolResult:
         tool = self._tools.get(call.name)
         if tool is None:
             return ToolResult.failure(
@@ -149,6 +155,20 @@ class ToolRegistry:
             return ToolResult.failure(
                 "INVALID_ARGUMENTS",
                 "Tool arguments must be a JSON object",
+            )
+
+        policy = approval_policy or DenySideEffectsPolicy()
+        try:
+            approved = policy.approve(tool.name, tool.risk, arguments)
+        except Exception:
+            return ToolResult.failure(
+                "APPROVAL_ERROR",
+                "Approval policy failed unexpectedly",
+            )
+        if not approved:
+            return ToolResult.failure(
+                "PERMISSION_DENIED",
+                f"Permission denied for {tool.risk.value} tool: {tool.name}",
             )
 
         try:

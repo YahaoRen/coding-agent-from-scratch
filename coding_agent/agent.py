@@ -7,6 +7,7 @@ from enum import Enum
 
 from coding_agent.domain import Message
 from coding_agent.model import ModelClient, ModelError
+from coding_agent.policy import ApprovalPolicy, DenySideEffectsPolicy
 from coding_agent.prompt import SYSTEM_PROMPT
 from coding_agent.tools import ToolRegistry, ToolResult
 
@@ -57,6 +58,7 @@ class Agent:
         *,
         limits: AgentLimits | None = None,
         system_prompt: str = SYSTEM_PROMPT,
+        approval_policy: ApprovalPolicy | None = None,
     ) -> None:
         if not system_prompt.strip():
             raise ValueError("system_prompt cannot be empty")
@@ -64,6 +66,7 @@ class Agent:
         self._tools = tools
         self._limits = limits or AgentLimits()
         self._system_prompt = system_prompt
+        self._approval_policy = approval_policy or DenySideEffectsPolicy()
 
     def run(self, task: str) -> AgentResult:
         """Run until the model answers, an error occurs, or a limit is reached."""
@@ -144,7 +147,7 @@ class Agent:
                 )
 
             for call in assistant.tool_calls:
-                result = self._tools.execute(call)
+                result = self._tools.execute(call, self._approval_policy)
                 history.append(
                     Message(
                         role="tool",

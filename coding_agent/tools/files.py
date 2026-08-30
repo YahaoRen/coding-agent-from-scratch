@@ -7,7 +7,13 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
-from coding_agent.tools.base import Tool, ToolArgumentError, ToolResult
+from coding_agent.tools.arguments import (
+    boolean_argument,
+    integer_argument,
+    reject_extra_arguments,
+    text_argument,
+)
+from coding_agent.tools.base import Tool, ToolResult
 from coding_agent.workspace import Workspace, WorkspaceError
 
 
@@ -115,9 +121,9 @@ def create_read_only_tools(workspace: Workspace) -> tuple[Tool, ...]:
 
 
 def _list_files(workspace: Workspace, arguments: Mapping[str, Any]) -> ToolResult:
-    _reject_extra_arguments(arguments, {"path", "max_results"})
-    path_text = _text_argument(arguments, "path", default=".")
-    max_results = _integer_argument(
+    reject_extra_arguments(arguments, {"path", "max_results"})
+    path_text = text_argument(arguments, "path", default=".")
+    max_results = integer_argument(
         arguments,
         "max_results",
         default=DEFAULT_LIST_RESULTS,
@@ -149,10 +155,10 @@ def _list_files(workspace: Workspace, arguments: Mapping[str, Any]) -> ToolResul
 
 
 def _read_file(workspace: Workspace, arguments: Mapping[str, Any]) -> ToolResult:
-    _reject_extra_arguments(arguments, {"path", "start_line", "max_lines"})
-    path_text = _text_argument(arguments, "path")
-    start_line = _integer_argument(arguments, "start_line", default=1, minimum=1)
-    max_lines = _integer_argument(
+    reject_extra_arguments(arguments, {"path", "start_line", "max_lines"})
+    path_text = text_argument(arguments, "path")
+    start_line = integer_argument(arguments, "start_line", default=1, minimum=1)
+    max_lines = integer_argument(
         arguments,
         "max_lines",
         default=DEFAULT_READ_LINES,
@@ -200,16 +206,14 @@ def _read_file(workspace: Workspace, arguments: Mapping[str, Any]) -> ToolResult
 
 
 def _search_text(workspace: Workspace, arguments: Mapping[str, Any]) -> ToolResult:
-    _reject_extra_arguments(
+    reject_extra_arguments(
         arguments,
         {"query", "path", "case_sensitive", "max_results"},
     )
-    query = _text_argument(arguments, "query")
-    if not query:
-        raise ToolArgumentError("query cannot be empty")
-    path_text = _text_argument(arguments, "path", default=".")
-    case_sensitive = _boolean_argument(arguments, "case_sensitive", default=False)
-    max_results = _integer_argument(
+    query = text_argument(arguments, "query")
+    path_text = text_argument(arguments, "path", default=".")
+    case_sensitive = boolean_argument(arguments, "case_sensitive", default=False)
+    max_results = integer_argument(
         arguments,
         "max_results",
         default=DEFAULT_SEARCH_RESULTS,
@@ -296,54 +300,3 @@ def _iter_files(directory: Path) -> Iterator[Path]:
             file_path = root_path / file_name
             if not file_path.is_symlink():
                 yield file_path
-
-
-def _reject_extra_arguments(arguments: Mapping[str, Any], allowed: set[str]) -> None:
-    extras = sorted(set(arguments) - allowed)
-    if extras:
-        raise ToolArgumentError(f"Unexpected arguments: {', '.join(extras)}")
-
-
-def _text_argument(
-    arguments: Mapping[str, Any],
-    name: str,
-    *,
-    default: str | None = None,
-) -> str:
-    value = arguments.get(name, default)
-    if not isinstance(value, str):
-        raise ToolArgumentError(f"{name} must be text")
-    if name != "path" and not value.strip():
-        raise ToolArgumentError(f"{name} cannot be empty")
-    return value
-
-
-def _integer_argument(
-    arguments: Mapping[str, Any],
-    name: str,
-    *,
-    default: int,
-    minimum: int,
-    maximum: int | None = None,
-) -> int:
-    value = arguments.get(name, default)
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ToolArgumentError(f"{name} must be an integer")
-    if value < minimum or (maximum is not None and value > maximum):
-        range_text = f"at least {minimum}"
-        if maximum is not None:
-            range_text = f"between {minimum} and {maximum}"
-        raise ToolArgumentError(f"{name} must be {range_text}")
-    return value
-
-
-def _boolean_argument(
-    arguments: Mapping[str, Any],
-    name: str,
-    *,
-    default: bool,
-) -> bool:
-    value = arguments.get(name, default)
-    if not isinstance(value, bool):
-        raise ToolArgumentError(f"{name} must be a boolean")
-    return value

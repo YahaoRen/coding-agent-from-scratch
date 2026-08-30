@@ -8,6 +8,7 @@ from coding_agent.tools.base import (
     ToolResult,
 )
 from coding_agent.tools.files import create_read_only_tools
+from coding_agent.tools.editing import create_write_tools
 
 __all__ = [
     "Tool",
@@ -16,4 +17,5 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "create_read_only_tools",
+    "create_write_tools",
 ]

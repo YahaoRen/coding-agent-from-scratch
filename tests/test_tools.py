@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from coding_agent.domain import ToolCall
+from coding_agent.policy import ToolRisk
 from coding_agent.tools import Tool, ToolArgumentError, ToolRegistry, ToolResult
 
 
@@ -128,6 +129,29 @@ class ToolRegistryTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "already registered"):
             registry.register(make_add_tool())
+
+    def test_side_effect_tool_is_denied_before_handler_runs(self) -> None:
+        called = False
+
+        def write_handler(arguments: Mapping[str, Any]) -> ToolResult:
+            nonlocal called
+            called = True
+            return ToolResult.success()
+
+        tool = Tool(
+            name="write_something",
+            description="Pretend to write for a test.",
+            parameters={"type": "object"},
+            handler=write_handler,
+            risk=ToolRisk.WRITE,
+        )
+
+        result = ToolRegistry((tool,)).execute(
+            ToolCall("call_1", "write_something", "{}")
+        )
+
+        self.assertEqual(result.error.code, "PERMISSION_DENIED")
+        self.assertFalse(called)
 
 
 if __name__ == "__main__":

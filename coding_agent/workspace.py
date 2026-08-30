@@ -70,6 +70,34 @@ class Workspace:
             raise WorkspaceError("NOT_A_DIRECTORY", f"Not a directory: {relative_path}")
         return target
 
+    def resolve_for_write(self, relative_path: str) -> Path:
+        """Resolve a writable file path with an existing in-workspace parent."""
+
+        normalized = self._validate_path_text(relative_path)
+        unresolved_target = self._root / normalized
+        if unresolved_target.is_symlink():
+            raise WorkspaceError(
+                "SYMLINK_NOT_ALLOWED",
+                "Writing through symbolic links is not allowed",
+            )
+        target = self.resolve(relative_path, must_exist=False)
+        try:
+            parent = target.parent.resolve(strict=True)
+        except FileNotFoundError as error:
+            raise WorkspaceError(
+                "PARENT_NOT_FOUND",
+                f"Parent directory does not exist: {relative_path}",
+            ) from error
+        self._ensure_inside(parent)
+        if not parent.is_dir():
+            raise WorkspaceError(
+                "PARENT_NOT_FOUND",
+                f"Parent is not a directory: {relative_path}",
+            )
+        if target.exists() and not target.is_file():
+            raise WorkspaceError("NOT_A_FILE", f"Not a file: {relative_path}")
+        return target
+
     def display_path(self, path: Path) -> str:
         """Return a stable slash-separated path without exposing the root."""
 
