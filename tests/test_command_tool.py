@@ -140,6 +140,20 @@ class CommandToolTests(unittest.TestCase):
         self.assertIn("red", result.data["stdout"])
         self.assertIn("�", result.data["stdout"])
 
+    def test_python_child_uses_utf8_for_chinese_output(self) -> None:
+        result = self.execute(
+            {
+                "argv": [
+                    sys.executable,
+                    "-c",
+                    "print('中文路径')",
+                ]
+            }
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.data["stdout"].strip(), "中文路径")
+
     def test_invalid_argv_is_rejected_before_start(self) -> None:
         empty = self.execute({"argv": []})
         wrong_item = self.execute({"argv": [sys.executable, 3]})

@@ -1,0 +1,30 @@
+%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "fontFamily": "Arial, sans-serif", "lineColor": "#64748b"}}}%%
+flowchart TD
+  U["用户给出编程任务"] --> CLI["命令行入口"]
+  CLI --> LOOP["Agent 主循环"]
+  LOOP --> MODEL["大语言模型 API"]
+  MODEL -->|"文字或工具调用"| LOOP
+
+  LOOP --> REG["本地工具注册表"]
+  subgraph TOOLS["本地执行工具"]
+    direction LR
+    READ["查看文件和搜索代码"]
+    WRITE["新建或精确修改文件"]
+    CMD["运行测试或其他命令"]
+  end
+  REG --> READ & WRITE & CMD
+  READ & WRITE & CMD --> RESULT["结构化执行结果"]
+  RESULT --> LOOP
+
+  SAFE["安全护栏<br/>路径边界、人工审批、次数限制、密钥脱敏"] -.-> LOOP
+  SAFE -.-> REG
+  LOOP --> DONE["任务完成并给出总结"]
+
+  classDef user fill:#e8f1ff,stroke:#2563eb,color:#172554;
+  classDef core fill:#ede9fe,stroke:#7c3aed,color:#2e1065;
+  classDef tool fill:#ecfdf5,stroke:#059669,color:#052e16;
+  classDef safety fill:#fff7ed,stroke:#ea580c,color:#431407;
+  class U,DONE user;
+  class CLI,LOOP,MODEL core;
+  class REG,READ,WRITE,CMD,RESULT tool;
+  class SAFE safety;

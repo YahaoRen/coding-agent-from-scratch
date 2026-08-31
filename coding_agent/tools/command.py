@@ -223,7 +223,9 @@ def _safe_child_environment() -> dict[str, str]:
             "GIT_TERMINAL_PROMPT": "0",
             "NO_COLOR": "1",
             "PAGER": "cat",
+            "PYTHONIOENCODING": "utf-8",
             "PYTHONUNBUFFERED": "1",
+            "PYTHONUTF8": "1",
         }
     )
     return environment
