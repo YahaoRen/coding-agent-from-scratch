@@ -78,6 +78,39 @@ class WorkspaceTests(unittest.TestCase):
 
         self.assertEqual(target, self.root.resolve() / "new.txt")
 
+    def test_credential_files_and_internal_metadata_are_protected(self) -> None:
+        (self.root / ".env").write_text("TOKEN=secret", encoding="utf-8")
+        (self.root / ".git").mkdir()
+        (self.root / ".git" / "config").write_text("private", encoding="utf-8")
+
+        for path_text in (".env", ".git", ".git/config"):
+            with self.subTest(path=path_text):
+                with self.assertRaises(WorkspaceError) as raised:
+                    self.workspace.resolve(path_text)
+                self.assertEqual(raised.exception.code, "PROTECTED_PATH")
+
+    def test_dotenv_example_remains_visible(self) -> None:
+        example = self.root / ".env.example"
+        example.write_text("TOKEN=replace-me", encoding="utf-8")
+
+        self.assertEqual(self.workspace.resolve_file(".env.example"), example.resolve())
+
+    def test_cli_can_protect_a_custom_configuration_path(self) -> None:
+        custom = self.root / "model.config"
+        custom.write_text("private", encoding="utf-8")
+        workspace = Workspace(self.root, protected_paths=(custom,))
+
+        with self.assertRaises(WorkspaceError) as raised:
+            workspace.resolve_file("model.config")
+
+        self.assertEqual(raised.exception.code, "PROTECTED_PATH")
+
+    def test_protected_files_cannot_be_created_or_edited(self) -> None:
+        with self.assertRaises(WorkspaceError) as raised:
+            self.workspace.resolve_for_write(".env.local")
+
+        self.assertEqual(raised.exception.code, "PROTECTED_PATH")
+
     def test_file_and_directory_types_are_checked(self) -> None:
         file_path = self.root / "file.txt"
         file_path.write_text("text", encoding="utf-8")

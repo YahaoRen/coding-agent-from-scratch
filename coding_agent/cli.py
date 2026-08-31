@@ -78,6 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-steps", type=int, default=20)
     run.add_argument("--max-tool-calls", type=int, default=50)
     run.add_argument(
+        "--max-identical-calls",
+        type=int,
+        default=2,
+        help="Maximum consecutive identical tool calls before stopping (default: 2).",
+    )
+    run.add_argument(
         "--context-characters",
         type=int,
         default=120_000,
@@ -89,10 +95,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=2,
         help="Retries for transient model failures (default: 2; maximum: 5).",
     )
-    run.add_argument(
+    approval_group = run.add_mutually_exclusive_group()
+    approval_group.add_argument(
         "--yes",
         action="store_true",
-        help="Automatically approve every write and command (trusted workspaces only).",
+        help="Automatically approve file writes; commands still require confirmation.",
+    )
+    approval_group.add_argument(
+        "--yes-all",
+        action="store_true",
+        help="Automatically approve writes and commands (trusted isolated workspaces only).",
     )
     run.add_argument(
         "--save-session",
@@ -137,12 +149,28 @@ def _doctor(env_file: Path) -> int:
 
 
 def _run(arguments: argparse.Namespace) -> int:
+    if not arguments.task.strip():
+        print("Setup error: task cannot be empty", file=sys.stderr)
+        return 2
+
     try:
         settings = Settings.load(env_file=arguments.env_file)
-        workspace = Workspace(arguments.workspace)
+        workspace = Workspace(
+            arguments.workspace,
+            protected_paths=(arguments.env_file,),
+        )
+        if (
+            arguments.yes_all
+            and arguments.env_file.exists()
+            and _path_is_inside(arguments.env_file, workspace.root)
+        ):
+            raise ConfigurationError(
+                "--yes-all requires the model credential file to be outside the workspace"
+            )
         limits = AgentLimits(
             max_steps=arguments.max_steps,
             max_tool_calls=arguments.max_tool_calls,
+            max_consecutive_identical_calls=arguments.max_identical_calls,
         )
         context_window = ContextWindow(
             ContextLimits(max_characters=arguments.context_characters)
@@ -157,9 +185,12 @@ def _run(arguments: argparse.Namespace) -> int:
         + create_write_tools(workspace)
         + (create_command_tool(workspace, secrets=(settings.api_key,)),)
     )
-    if arguments.yes:
+    if arguments.yes_all:
         print("Warning: automatically approving all writes and commands.")
         approval_policy = AllowAllPolicy()
+    elif arguments.yes:
+        print("Automatically approving file writes; commands still require confirmation.")
+        approval_policy = CallbackApprovalPolicy(_approve_writes_only)
     else:
         approval_policy = CallbackApprovalPolicy(_prompt_for_approval)
 
@@ -174,6 +205,7 @@ def _run(arguments: argparse.Namespace) -> int:
         approval_policy=approval_policy,
         observer=_print_event,
         context_window=context_window,
+        secrets=(settings.api_key,),
     )
     try:
         result = agent.run(arguments.task)
@@ -216,6 +248,27 @@ def _prompt_for_approval(
     except EOFError:
         return False
     return answer in {"y", "yes"}
+
+
+def _approve_writes_only(
+    tool_name: str,
+    risk: ToolRisk,
+    arguments: Mapping[str, Any],
+) -> bool:
+    if risk in {ToolRisk.READ, ToolRisk.WRITE}:
+        return True
+    return _prompt_for_approval(tool_name, risk, arguments)
+
+
+def _path_is_inside(path: Path, directory: Path) -> bool:
+    expanded = path.expanduser()
+    for candidate in (expanded.absolute(), expanded.resolve(strict=False)):
+        try:
+            candidate.relative_to(directory)
+            return True
+        except (OSError, RuntimeError, ValueError):
+            continue
+    return False
 
 
 def _summarize_arguments(arguments: Mapping[str, Any]) -> str:

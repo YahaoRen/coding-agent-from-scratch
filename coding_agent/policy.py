@@ -41,7 +41,7 @@ class DenySideEffectsPolicy:
 
 
 class AllowAllPolicy:
-    """Explicit trusted mode used by tests and the future --yes CLI flag."""
+    """Explicit trusted mode used by tests and the --yes-all CLI flag."""
 
     def approve(
         self,

@@ -109,6 +109,24 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result.status, AgentStatus.PROTOCOL_ERROR)
         self.assertIn("neither text nor tool calls", result.error)
 
+    def test_truncated_model_turn_is_not_reported_as_complete(self) -> None:
+        result = Agent(
+            ScriptedModel([assistant("Partial answer", finish_reason="length")]),
+            ToolRegistry(),
+        ).run("Do something")
+
+        self.assertEqual(result.status, AgentStatus.PROTOCOL_ERROR)
+        self.assertIn("truncated", result.error)
+
+    def test_tool_call_finish_reason_requires_a_tool_call(self) -> None:
+        result = Agent(
+            ScriptedModel([assistant("Unexpected", finish_reason="tool_calls")]),
+            ToolRegistry(),
+        ).run("Do something")
+
+        self.assertEqual(result.status, AgentStatus.PROTOCOL_ERROR)
+        self.assertIn("did not provide any", result.error)
+
     def test_model_error_stops_cleanly(self) -> None:
         result = Agent(
             ScriptedModel([ModelConnectionError("offline")]),
@@ -133,6 +151,87 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result.status, AgentStatus.MAX_STEPS)
         self.assertEqual(result.model_steps, 2)
         self.assertEqual(result.tool_calls, 2)
+
+    def test_repeated_identical_tool_call_stops_before_third_execution(self) -> None:
+        seen: list[str] = []
+        turns = [
+            assistant(None, ToolCall(f"call_{index}", "echo", '{"text":"again"}'))
+            for index in range(3)
+        ]
+
+        result = Agent(
+            ScriptedModel(turns),
+            ToolRegistry((echo_tool(seen),)),
+        ).run("Keep repeating")
+
+        self.assertEqual(result.status, AgentStatus.STALLED)
+        self.assertEqual(seen, ["again", "again"])
+        self.assertEqual(result.tool_calls, 2)
+        self.assertEqual(json.loads(result.history[-1].content)["error"]["code"], "REPEATED_TOOL_CALL")
+
+    def test_known_secret_is_redacted_before_model_and_tool_observer(self) -> None:
+        secret = "private-api-key"
+        events = []
+        model = ScriptedModel(
+            [
+                assistant(
+                    None,
+                    ToolCall("call_1", "echo", json.dumps({"text": secret})),
+                ),
+                assistant(f"finished with {secret}"),
+            ]
+        )
+
+        result = Agent(
+            model,
+            ToolRegistry((echo_tool(),)),
+            observer=events.append,
+            secrets=(secret,),
+        ).run(f"Do not expose {secret}")
+
+        rendered_requests = " ".join(
+            json.dumps(message.to_api_dict(), ensure_ascii=False)
+            for request, _ in model.requests
+            for message in request
+        )
+        rendered_history = " ".join(
+            json.dumps(message.to_api_dict(), ensure_ascii=False)
+            for message in result.history
+        )
+        rendered_events = " ".join(
+            event.result.to_json()
+            for event in events
+            if event.result is not None
+        )
+        self.assertNotIn(secret, rendered_requests)
+        self.assertNotIn(secret, rendered_history)
+        self.assertNotIn(secret, rendered_events)
+        self.assertEqual(result.final_text, "finished with [REDACTED]")
+
+    def test_large_tool_result_is_bounded_before_next_model_request(self) -> None:
+        def large_result(arguments: Mapping[str, Any]) -> ToolResult:
+            return ToolResult.success({"text": "x" * 100_000})
+
+        tool = Tool(
+            name="large_result",
+            description="Return a large test result.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            handler=large_result,
+        )
+        model = ScriptedModel(
+            [
+                assistant(None, ToolCall("call_1", "large_result", "{}")),
+                assistant("Done"),
+            ]
+        )
+
+        result = Agent(model, ToolRegistry((tool,))).run("Get a large result")
+
+        tool_message = model.requests[1][0][-1]
+        payload = json.loads(tool_message.content)
+        self.assertEqual(result.status, AgentStatus.COMPLETED)
+        self.assertLessEqual(len(tool_message.content), 32_000)
+        self.assertTrue(payload["data"]["result_truncated"])
 
     def test_tool_call_limit_prevents_partial_batch_execution(self) -> None:
         seen: list[str] = []

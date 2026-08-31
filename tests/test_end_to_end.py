@@ -154,7 +154,7 @@ class EndToEndCodingTaskTests(unittest.TestCase):
                             str(env_file),
                             "--model-retries",
                             "0",
-                            "--yes",
+                            "--yes-all",
                         ]
                     )
 
@@ -169,6 +169,7 @@ class EndToEndCodingTaskTests(unittest.TestCase):
         self.assertIn("Completed", stdout.getvalue())
         self.assertIn("run_command: ok", stdout.getvalue())
         self.assertNotIn("local-test-key", stdout.getvalue() + stderr.getvalue())
+        self.assertNotIn("local-test-key", json.dumps(server.requests))
         self.assertEqual(len(server.requests), 4)
         self.assertEqual(
             server.authorization_headers,

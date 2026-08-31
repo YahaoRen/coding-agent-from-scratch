@@ -134,7 +134,7 @@ def _list_files(workspace: Workspace, arguments: Mapping[str, Any]) -> ToolResul
         directory = workspace.resolve_directory(path_text)
         files: list[str] = []
         truncated = False
-        for file_path in _iter_files(directory):
+        for file_path in _iter_files(directory, workspace):
             if len(files) >= max_results:
                 truncated = True
                 break
@@ -222,7 +222,11 @@ def _search_text(workspace: Workspace, arguments: Mapping[str, Any]) -> ToolResu
     )
     try:
         search_root = workspace.resolve(path_text)
-        candidates = [search_root] if search_root.is_file() else _iter_files(search_root)
+        candidates = (
+            [search_root]
+            if search_root.is_file()
+            else _iter_files(search_root, workspace)
+        )
         matches: list[dict[str, Any]] = []
         truncated = False
         needle = query if case_sensitive else query.casefold()
@@ -287,7 +291,7 @@ def _read_text_bytes(file_path: Path) -> str:
         raise SourceFileError("INVALID_ENCODING", "File is not valid UTF-8 text") from error
 
 
-def _iter_files(directory: Path) -> Iterator[Path]:
+def _iter_files(directory: Path, workspace: Workspace) -> Iterator[Path]:
     for current_root, directory_names, file_names in os.walk(directory, followlinks=False):
         root_path = Path(current_root)
         directory_names[:] = sorted(
@@ -295,8 +299,9 @@ def _iter_files(directory: Path) -> Iterator[Path]:
             for name in directory_names
             if name not in IGNORED_DIRECTORIES
             and not (root_path / name).is_symlink()
+            and workspace.is_accessible(root_path / name)
         )
         for file_name in sorted(file_names):
             file_path = root_path / file_name
-            if not file_path.is_symlink():
+            if not file_path.is_symlink() and workspace.is_accessible(file_path):
                 yield file_path

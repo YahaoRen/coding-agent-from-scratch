@@ -2,7 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath, PureWindowsPath
+
+
+PROTECTED_DIRECTORY_NAMES = frozenset(
+    {
+        ".coding-agent",
+        ".git",
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        "venv",
+    }
+)
+PROTECTED_FILE_NAMES = frozenset(
+    {
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        "credentials.json",
+        "id_ed25519",
+        "id_rsa",
+    }
+)
 
 
 class WorkspaceError(ValueError):
@@ -16,7 +39,12 @@ class WorkspaceError(ValueError):
 class Workspace:
     """The only component allowed to turn model path text into real paths."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        protected_paths: Iterable[Path] = (),
+    ) -> None:
         try:
             resolved_root = root.expanduser().resolve(strict=True)
         except (OSError, RuntimeError) as error:
@@ -24,6 +52,11 @@ class Workspace:
         if not resolved_root.is_dir():
             raise WorkspaceError("INVALID_WORKSPACE", "Workspace must be a directory")
         self._root = resolved_root
+        self._protected_paths = tuple(
+            resolved
+            for path in protected_paths
+            if (resolved := self._resolve_protected_path(path)) is not None
+        )
 
     @property
     def root(self) -> Path:
@@ -47,6 +80,7 @@ class Workspace:
             raise WorkspaceError("INVALID_PATH", f"Invalid path: {relative_path}") from error
 
         self._ensure_inside(target)
+        self._ensure_accessible(target)
         return target
 
     def _ensure_inside(self, target: Path) -> None:
@@ -57,6 +91,51 @@ class Workspace:
                 "OUTSIDE_WORKSPACE",
                 "Path must stay inside the workspace",
             ) from error
+
+    def _ensure_accessible(self, target: Path) -> None:
+        relative = target.relative_to(self._root)
+        folded_parts = tuple(part.casefold() for part in relative.parts)
+        if any(part in PROTECTED_DIRECTORY_NAMES for part in folded_parts):
+            raise WorkspaceError(
+                "PROTECTED_PATH",
+                "Access to protected workspace metadata is not allowed",
+            )
+
+        file_name = relative.name.casefold()
+        is_dotenv = file_name == ".env" or (
+            file_name.startswith(".env.") and file_name != ".env.example"
+        )
+        if file_name in PROTECTED_FILE_NAMES or is_dotenv:
+            raise WorkspaceError(
+                "PROTECTED_PATH",
+                "Access to a protected credential file is not allowed",
+            )
+
+        for protected in self._protected_paths:
+            if target == protected or protected in target.parents:
+                raise WorkspaceError(
+                    "PROTECTED_PATH",
+                    "Access to the configured secret file is not allowed",
+                )
+
+    def _resolve_protected_path(self, path: Path) -> Path | None:
+        try:
+            resolved = path.expanduser().resolve(strict=False)
+            resolved.relative_to(self._root)
+        except (OSError, RuntimeError, ValueError):
+            return None
+        return resolved
+
+    def is_accessible(self, path: Path) -> bool:
+        """Return whether an already discovered path may be shown to the model."""
+
+        try:
+            resolved = path.resolve(strict=False)
+            self._ensure_inside(resolved)
+            self._ensure_accessible(resolved)
+        except (OSError, RuntimeError, WorkspaceError):
+            return False
+        return True
 
     def resolve_file(self, relative_path: str) -> Path:
         target = self.resolve(relative_path)
@@ -102,7 +181,9 @@ class Workspace:
         """Return a stable slash-separated path without exposing the root."""
 
         try:
-            return path.resolve().relative_to(self._root).as_posix() or "."
+            resolved = path.resolve()
+            self._ensure_accessible(resolved)
+            return resolved.relative_to(self._root).as_posix() or "."
         except ValueError as error:
             raise WorkspaceError(
                 "OUTSIDE_WORKSPACE",

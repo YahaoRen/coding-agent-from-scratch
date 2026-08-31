@@ -67,11 +67,37 @@ class ReadOnlyToolTests(unittest.TestCase):
         (self.root / "src" / "a.py").write_text("", encoding="utf-8")
         (self.root / ".git").mkdir()
         (self.root / ".git" / "config").write_text("private", encoding="utf-8")
+        (self.root / ".env").write_text("TOKEN=private", encoding="utf-8")
+        (self.root / ".env.example").write_text("TOKEN=replace-me", encoding="utf-8")
 
         result = self.execute("list_files", '{"path":"."}')
 
         self.assertTrue(result.ok)
-        self.assertEqual(result.data["files"], ["src/a.py", "src/z.py"])
+        self.assertEqual(
+            result.data["files"],
+            [".env.example", "src/a.py", "src/z.py"],
+        )
+
+    def test_direct_read_and_search_cannot_bypass_protected_paths(self) -> None:
+        secret = "sentinel-private-value"
+        (self.root / ".env").write_text(f"TOKEN={secret}\n", encoding="utf-8")
+        (self.root / ".git").mkdir()
+        (self.root / ".git" / "config").write_text(secret, encoding="utf-8")
+
+        read_env = self.execute("read_file", '{"path":".env"}')
+        read_git = self.execute("read_file", '{"path":".git/config"}')
+        search_git = self.execute(
+            "search_text",
+            '{"query":"sentinel","path":".git"}',
+        )
+        search_root = self.execute("search_text", '{"query":"sentinel"}')
+
+        self.assertEqual(read_env.error.code, "PROTECTED_PATH")
+        self.assertEqual(read_git.error.code, "PROTECTED_PATH")
+        self.assertEqual(search_git.error.code, "PROTECTED_PATH")
+        self.assertTrue(search_root.ok)
+        self.assertEqual(search_root.data["count"], 0)
+        self.assertNotIn(secret, search_root.to_json())
 
     def test_list_files_reports_truncation(self) -> None:
         for index in range(3):

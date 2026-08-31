@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from coding_agent.cli import _prompt_for_approval, main
+from coding_agent.cli import _approve_writes_only, _prompt_for_approval, main
 from coding_agent.policy import ToolRisk
 
 
@@ -54,6 +55,37 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("Configuration error", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_empty_run_task_is_rejected_without_traceback(self) -> None:
+        result = self.run_cli("run", "")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("task cannot be empty", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_yes_all_rejects_a_credential_file_inside_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            env_file = workspace / "model.env"
+            env_file.write_text(
+                "CODING_AGENT_API_KEY=private-key\n"
+                "CODING_AGENT_MODEL=test-model\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "run",
+                "Do the task",
+                "--workspace",
+                str(workspace),
+                "--env-file",
+                str(env_file),
+                "--yes-all",
+            )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("credential file", result.stderr)
+        self.assertNotIn("private-key", result.stdout + result.stderr)
+
     def test_doctor_never_prints_secret(self) -> None:
         with patch.dict(
             "os.environ",
@@ -79,7 +111,7 @@ class CommandLineTests(unittest.TestCase):
         input_mock.assert_not_called()
 
     def test_side_effect_approval_defaults_to_no(self) -> None:
-        with patch("builtins.input", return_value=""):
+        with patch("builtins.input", return_value=""), patch("builtins.print"):
             approved = _prompt_for_approval(
                 "write_file",
                 ToolRisk.WRITE,
@@ -87,6 +119,26 @@ class CommandLineTests(unittest.TestCase):
             )
 
         self.assertFalse(approved)
+
+    def test_yes_mode_approves_writes_but_still_asks_for_commands(self) -> None:
+        with (
+            patch("builtins.input", return_value="") as input_mock,
+            patch("builtins.print"),
+        ):
+            write_approved = _approve_writes_only(
+                "edit_file",
+                ToolRisk.WRITE,
+                {"path": "a.py"},
+            )
+            command_approved = _approve_writes_only(
+                "run_command",
+                ToolRisk.EXECUTE,
+                {"argv": ["python", "-V"]},
+            )
+
+        self.assertTrue(write_approved)
+        self.assertFalse(command_approved)
+        input_mock.assert_called_once()
 
 
 if __name__ == "__main__":
