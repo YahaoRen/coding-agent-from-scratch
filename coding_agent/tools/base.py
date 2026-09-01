@@ -136,6 +136,7 @@ class ToolRegistry:
         self,
         call: ToolCall,
         approval_policy: ApprovalPolicy | None = None,
+        stop_requested: Callable[[], bool] | None = None,
     ) -> ToolResult:
         tool = self._tools.get(call.name)
         if tool is None:
@@ -169,6 +170,11 @@ class ToolRegistry:
             return ToolResult.failure(
                 "PERMISSION_DENIED",
                 f"Permission denied for {tool.risk.value} tool: {tool.name}",
+            )
+        if stop_requested is not None and stop_requested():
+            return ToolResult.failure(
+                "RUN_CANCELLED",
+                "The run was cancelled before the tool started",
             )
 
         try:

@@ -62,6 +62,25 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("task cannot be empty", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_web_help_is_available(self) -> None:
+        result = self.run_cli("web", "--help")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--workspace", result.stdout)
+        self.assertIn("--no-open", result.stdout)
+
+    def test_web_rejects_a_missing_workspace_without_traceback(self) -> None:
+        result = self.run_cli(
+            "web",
+            "--workspace",
+            "missing-workspace-for-web-test",
+            "--no-open",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Setup error", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_yes_all_rejects_a_credential_file_inside_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)

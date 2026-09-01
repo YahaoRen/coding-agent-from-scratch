@@ -8,7 +8,7 @@ import signal
 import subprocess
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, BinaryIO
 
@@ -51,6 +51,7 @@ def create_command_tool(
     workspace: Workspace,
     *,
     secrets: Sequence[str] = (),
+    stop_requested: Callable[[], bool] | None = None,
 ) -> Tool:
     """Create one command tool bound to a fixed workspace and secret set."""
 
@@ -83,6 +84,7 @@ def create_command_tool(
             workspace,
             arguments,
             secret_values,
+            stop_requested,
         ),
         risk=ToolRisk.EXECUTE,
     )
@@ -92,6 +94,7 @@ def _run_command(
     workspace: Workspace,
     arguments: Mapping[str, Any],
     secrets: Sequence[str],
+    stop_requested: Callable[[], bool] | None,
 ) -> ToolResult:
     reject_extra_arguments(arguments, {"argv", "timeout_seconds"})
     argv = _argv_argument(arguments)
@@ -106,6 +109,12 @@ def _run_command(
     stdout_capture = BoundedCapture()
     stderr_capture = BoundedCapture()
     started_at = time.monotonic()
+    if _stop_was_requested(stop_requested):
+        return ToolResult.failure(
+            "COMMAND_CANCELLED",
+            "Command was cancelled before it started",
+            data={"cancelled": True, "timed_out": False, "duration_ms": 0},
+        )
     try:
         process = _start_process(argv, workspace)
     except OSError:
@@ -128,16 +137,26 @@ def _run_command(
     stderr_thread.start()
 
     timed_out = False
+    cancelled = False
+    deadline = started_at + timeout_seconds
     try:
-        return_code = process.wait(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        _terminate_process_tree(process)
-        try:
-            return_code = process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            return_code = process.wait()
+        while True:
+            if _stop_was_requested(stop_requested):
+                cancelled = True
+                _terminate_process_tree(process)
+                return_code = _wait_after_termination(process)
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                _terminate_process_tree(process)
+                return_code = _wait_after_termination(process)
+                break
+            try:
+                return_code = process.wait(timeout=min(0.2, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
     except KeyboardInterrupt:
         _terminate_process_tree(process)
         raise
@@ -153,6 +172,7 @@ def _run_command(
         "stdout": stdout,
         "stderr": stderr,
         "timed_out": timed_out,
+        "cancelled": cancelled,
         "duration_ms": duration_ms,
         "stdout_truncated": stdout_truncated,
         "stderr_truncated": stderr_truncated,
@@ -166,6 +186,12 @@ def _run_command(
             retryable=True,
             data=data,
         )
+    if cancelled:
+        return ToolResult.failure(
+            "COMMAND_CANCELLED",
+            "Command was cancelled by the user",
+            data=data,
+        )
     if return_code != 0:
         return ToolResult.failure(
             "NONZERO_EXIT",
@@ -174,6 +200,23 @@ def _run_command(
             data=data,
         )
     return ToolResult.success(data)
+
+
+def _stop_was_requested(callback: Callable[[], bool] | None) -> bool:
+    if callback is None:
+        return False
+    try:
+        return bool(callback())
+    except Exception:
+        return False
+
+
+def _wait_after_termination(process: subprocess.Popen[bytes]) -> int:
+    try:
+        return process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return process.wait()
 
 
 def _argv_argument(arguments: Mapping[str, Any]) -> list[str]:

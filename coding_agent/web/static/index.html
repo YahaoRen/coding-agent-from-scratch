@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="workbench-token" content="__WORKBENCH_TOKEN__">
+    <meta name="color-scheme" content="light">
+    <title>Coding Agent · 本地任务台</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar__inner">
+        <div class="brand" aria-label="Coding Agent 本地任务台">
+          <span class="brand__mark" aria-hidden="true">&gt;_</span>
+          <span class="brand__name">Coding Agent</span>
+          <span class="brand__division" aria-hidden="true"></span>
+          <span class="brand__section">本地任务台</span>
+        </div>
+
+        <div class="topbar__status" aria-label="工作台状态">
+          <div class="topbar__item" title="智能体只能通过文件工具访问这个工作区">
+            <span class="topbar__label">工作区</span>
+            <strong id="workspace-name">正在读取…</strong>
+          </div>
+          <div id="configuration-pill" class="status-pill status-pill--checking">
+            <span class="status-pill__dot" aria-hidden="true"></span>
+            <span id="configuration-status">检查配置</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="workbench">
+      <section id="task-panel" class="task-panel" aria-labelledby="task-heading">
+        <div class="task-panel__heading">
+          <div>
+            <p class="eyebrow">当前任务</p>
+            <h1 id="task-heading">告诉智能体需要完成什么</h1>
+          </div>
+          <span id="run-status" class="run-status run-status--idle">待开始</span>
+        </div>
+
+        <label class="sr-only" for="task-input">任务内容</label>
+        <textarea
+          id="task-input"
+          maxlength="8000"
+          rows="3"
+          spellcheck="false"
+          placeholder="例如：请先运行测试定位问题，只修改业务代码，最后再次运行测试确认通过。"
+        ></textarea>
+
+        <p id="configuration-hint" class="configuration-hint" hidden>
+          <span aria-hidden="true">!</span>
+          <span>还差一步：复制 .env.example 为 .env 并填写模型配置，然后刷新页面。</span>
+        </p>
+
+        <div class="task-panel__footer">
+          <div class="task-notes">
+            <span id="task-count">0 / 8000</span>
+            <span class="task-notes__separator" aria-hidden="true">·</span>
+            <span>只读操作自动执行，修改和命令需要批准</span>
+          </div>
+          <div class="task-actions">
+            <button id="cancel-button" class="button button--secondary" type="button" hidden>
+              停止任务
+            </button>
+            <button id="start-button" class="button button--primary" type="button" disabled>
+              开始任务
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section id="result-panel" class="result-panel" aria-labelledby="result-heading" hidden>
+        <div id="result-mark" class="result-panel__mark" aria-hidden="true">✓</div>
+        <div class="result-panel__body">
+          <p class="eyebrow">运行结果</p>
+          <h2 id="result-heading">任务已完成</h2>
+          <p id="result-text" class="result-panel__text"></p>
+          <dl class="result-stats" aria-label="运行统计">
+            <div>
+              <dt>模型轮次</dt>
+              <dd id="result-steps">0</dd>
+            </div>
+            <div>
+              <dt>工具调用</dt>
+              <dd id="result-tools">0</dd>
+            </div>
+            <div>
+              <dt>用时</dt>
+              <dd id="result-duration">0 秒</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <div class="workspace-grid">
+        <section class="panel timeline-panel" aria-labelledby="timeline-heading">
+          <div class="panel__header">
+            <div>
+              <p class="eyebrow">过程</p>
+              <h2 id="timeline-heading">执行记录</h2>
+            </div>
+            <span id="event-count" class="panel__count">0 项</span>
+          </div>
+
+          <div id="timeline-scroll" class="timeline-scroll">
+            <div id="timeline-empty" class="empty-state">
+              <div class="empty-state__mark" aria-hidden="true">01</div>
+              <h3>步骤会按顺序显示在这里</h3>
+              <p>开始任务后，可以看到模型请求、工具操作、审批和执行结果。</p>
+            </div>
+            <ol id="event-list" class="event-list" aria-label="任务执行事件"></ol>
+          </div>
+
+          <button id="jump-latest" class="jump-latest" type="button" hidden>
+            回到最新步骤
+          </button>
+        </section>
+
+        <section class="panel detail-panel" aria-labelledby="detail-heading">
+          <div class="panel__header detail-panel__header">
+            <div>
+              <p class="eyebrow">检查</p>
+              <h2 id="detail-heading">步骤详情</h2>
+            </div>
+            <span id="detail-time" class="detail-time"></span>
+          </div>
+
+          <div id="approval-panel" class="approval-panel" hidden>
+            <div class="approval-panel__heading">
+              <div class="approval-panel__icon" aria-hidden="true">!</div>
+              <div>
+                <p class="eyebrow">需要确认</p>
+                <h3 id="approval-title">允许本次操作？</h3>
+              </div>
+              <span id="approval-risk" class="risk-label">本地操作</span>
+            </div>
+            <p id="approval-summary" class="approval-panel__summary"></p>
+            <pre id="approval-preview" class="approval-preview" tabindex="0"></pre>
+            <div class="approval-panel__actions">
+              <button id="reject-button" class="button button--secondary" type="button">
+                拒绝
+              </button>
+              <button id="approve-button" class="button button--warning" type="button">
+                允许本次操作
+              </button>
+            </div>
+          </div>
+
+          <div id="detail-empty" class="detail-empty">
+            <div class="detail-empty__lines" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <h3>选择一个步骤查看详情</h3>
+            <p>文件内容、修改差异和命令输出会显示在这里。</p>
+          </div>
+
+          <article id="event-detail" class="event-detail" hidden>
+            <div class="event-detail__title-row">
+              <span id="detail-tone" class="tone-label">进行中</span>
+              <span id="detail-tool" class="tool-label"></span>
+            </div>
+            <h3 id="detail-title"></h3>
+            <p id="detail-summary" class="event-detail__summary"></p>
+            <div class="preview-heading">
+              <span>详细内容</span>
+              <span id="preview-hint">只读显示</span>
+            </div>
+            <pre id="detail-preview" class="code-view" tabindex="0"></pre>
+          </article>
+        </section>
+      </div>
+
+      <footer class="workbench-footer">
+        <span class="shield" aria-hidden="true">◆</span>
+        服务仅监听本机地址；API Key 不会发送到浏览器。
+      </footer>
+    </main>
+
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

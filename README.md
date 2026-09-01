@@ -11,6 +11,7 @@
 - 递归列出项目文件、分页读取文本、搜索代码。
 - 新建文件或进行可核对的精确文本修改。
 - 运行测试和其他非交互命令，并把输出交还模型分析。
+- 通过本地浏览器任务台查看时间线、检查差异、逐项审批和停止任务。
 - 在连接失败、限流或服务端临时错误时进行有限重试。
 - 控制上下文大小，保存经过脱敏的可选会话记录。
 - 在模型重复相同操作、超过轮数或工具次数时主动停止。
@@ -19,7 +20,7 @@
 
 ![Coding Agent 架构图](docs/architecture.png)
 
-核心代码按职责拆分：`agent.py` 管理循环，`providers/` 连接模型，`tools/` 执行本地操作，`workspace.py` 负责路径与敏感文件保护，`context.py` 控制发送给模型的历史。
+核心代码按职责拆分：`agent.py` 管理循环，`providers/` 连接模型，`tools/` 执行本地操作，`workspace.py` 负责路径与敏感文件保护，`context.py` 控制发送给模型的历史，`web/` 只负责本地页面、运行状态和人工审批。命令行与网页共用 `runtime.py` 创建同一个 Agent，不会形成两套行为。
 
 ## 快速开始
 
@@ -45,7 +46,13 @@ CODING_AGENT_MODEL=模型名称
 python -m coding_agent doctor
 ```
 
-运行内置演示任务：
+启动浏览器任务台（推荐用于演示）：
+
+```powershell
+python -m coding_agent web --workspace examples/inventory_reservation --env-file .env
+```
+
+服务只监听 `127.0.0.1`。页面只显示工作区名称，不显示完整电脑路径；关闭终端或按 `Ctrl+C` 即可停止服务。也可以继续使用命令行运行内置演示任务：
 
 ```powershell
 python -m coding_agent run "请修复当前项目中的失败测试。不要修改测试，最后再次运行测试确认全部通过。" --workspace examples/inventory_reservation --env-file .env
@@ -70,6 +77,7 @@ python -m coding_agent run "请修复当前项目中的失败测试。不要修�
 - 写入采用原子替换；精确编辑默认拒绝零匹配或多匹配。
 - 命令使用参数数组和固定工作目录，不经过 shell，并限制时间与输出大小。
 - 每轮工具结果有大小预算，避免一次输出挤满上下文。
+- 浏览器服务只绑定本机地址，并校验页面令牌、`Host` 和 `Origin`；模型密钥不会发送到前端。
 
 命令审批不是操作系统级沙箱。获批命令仍可能访问工作区之外的资源，因此不要对不可信项目使用 `--yes-all`，并尽量把模型配置文件放在目标工作区之外。
 

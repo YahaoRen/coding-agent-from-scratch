@@ -15,3 +15,6 @@ coding-agent = "coding_agent.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["coding_agent*"]
+
+[tool.setuptools.package-data]
+"coding_agent.web" = ["static/*"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import unittest
 from collections.abc import Mapping
 from typing import Any
@@ -11,6 +12,7 @@ from coding_agent.agent import Agent, AgentEventKind, AgentLimits, AgentStatus
 from coding_agent.context import ContextLimits, ContextWindow
 from coding_agent.domain import Message, ModelTurn, ToolCall
 from coding_agent.model import ModelConnectionError
+from coding_agent.policy import CallbackApprovalPolicy
 from coding_agent.tools import Tool, ToolRegistry, ToolResult
 from tests.fakes import ScriptedModel
 
@@ -136,6 +138,18 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result.status, AgentStatus.MODEL_ERROR)
         self.assertIn("offline", result.error)
 
+    def test_cancel_wins_when_in_flight_model_request_fails(self) -> None:
+        model = ScriptedModel([ModelConnectionError("network unavailable")])
+
+        result = Agent(
+            model,
+            ToolRegistry(),
+            stop_requested=lambda: bool(model.requests),
+        ).run("Do something")
+
+        self.assertEqual(result.status, AgentStatus.CANCELLED)
+        self.assertNotIn("network unavailable", result.error or "")
+
     def test_max_steps_stops_an_infinite_tool_loop(self) -> None:
         turns = [
             assistant(None, ToolCall(f"call_{index}", "echo", '{"text":"again"}'))
@@ -253,6 +267,45 @@ class AgentLoopTests(unittest.TestCase):
     def test_empty_task_is_rejected_before_model_call(self) -> None:
         with self.assertRaisesRegex(ValueError, "task cannot be empty"):
             Agent(ScriptedModel([]), ToolRegistry()).run("  ")
+
+    def test_stop_request_cancels_before_model_call(self) -> None:
+        model = ScriptedModel([])
+
+        result = Agent(
+            model,
+            ToolRegistry(),
+            stop_requested=lambda: True,
+        ).run("Do something")
+
+        self.assertEqual(result.status, AgentStatus.CANCELLED)
+        self.assertEqual(result.model_steps, 0)
+        self.assertEqual(model.requests, [])
+
+    def test_stop_request_after_approval_prevents_tool_execution(self) -> None:
+        stop = threading.Event()
+        seen: list[str] = []
+        call = ToolCall("call_1", "echo", '{"text":"hello"}')
+        model = ScriptedModel([assistant(None, call)])
+
+        def stop_after_tool(
+            tool_name: str,
+            risk: Any,
+            arguments: Mapping[str, Any],
+        ) -> bool:
+            stop.set()
+            return True
+
+        result = Agent(
+            model,
+            ToolRegistry((echo_tool(seen),)),
+            approval_policy=CallbackApprovalPolicy(stop_after_tool),
+            stop_requested=stop.is_set,
+        ).run("Echo hello")
+
+        self.assertEqual(result.status, AgentStatus.CANCELLED)
+        self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(len(model.requests), 1)
+        self.assertEqual(seen, [])
 
     def test_observer_receives_model_and_tool_progress(self) -> None:
         events = []

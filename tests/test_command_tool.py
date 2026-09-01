@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -26,8 +27,20 @@ class CommandToolTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def make_registry(self, *secrets: str) -> ToolRegistry:
-        return ToolRegistry((create_command_tool(Workspace(self.root), secrets=secrets),))
+    def make_registry(
+        self,
+        *secrets: str,
+        stop_requested=None,
+    ) -> ToolRegistry:
+        return ToolRegistry(
+            (
+                create_command_tool(
+                    Workspace(self.root),
+                    secrets=secrets,
+                    stop_requested=stop_requested,
+                ),
+            )
+        )
 
     def execute(
         self,
@@ -35,9 +48,13 @@ class CommandToolTests(unittest.TestCase):
         *,
         approved: bool = True,
         secrets: tuple[str, ...] = (),
+        stop_requested=None,
     ):
         policy = self.allow if approved else None
-        return self.make_registry(*secrets).execute(
+        return self.make_registry(
+            *secrets,
+            stop_requested=stop_requested,
+        ).execute(
             ToolCall("call_1", "run_command", json.dumps(arguments)),
             policy,
         )
@@ -94,6 +111,45 @@ class CommandToolTests(unittest.TestCase):
 
         self.assertEqual(result.error.code, "COMMAND_TIMEOUT")
         self.assertTrue(result.data["timed_out"])
+        self.assertLess(result.data["duration_ms"], 7000)
+
+    def test_cancel_before_start_does_not_launch_command(self) -> None:
+        stop = threading.Event()
+        stop.set()
+
+        with patch("coding_agent.tools.command._start_process") as start_process:
+            result = self.execute(
+                {
+                    "argv": [sys.executable, "-c", "import time; time.sleep(10)"],
+                    "timeout_seconds": 30,
+                },
+                stop_requested=stop.is_set,
+            )
+
+        self.assertEqual(result.error.code, "COMMAND_CANCELLED")
+        start_process.assert_not_called()
+        self.assertTrue(result.data["cancelled"])
+        self.assertFalse(result.data["timed_out"])
+        self.assertLess(result.data["duration_ms"], 7000)
+
+    def test_cancel_stops_running_command(self) -> None:
+        stop = threading.Event()
+        timer = threading.Timer(0.2, stop.set)
+        timer.start()
+        try:
+            result = self.execute(
+                {
+                    "argv": [sys.executable, "-c", "import time; time.sleep(10)"],
+                    "timeout_seconds": 30,
+                },
+                stop_requested=stop.is_set,
+            )
+        finally:
+            timer.cancel()
+
+        self.assertEqual(result.error.code, "COMMAND_CANCELLED")
+        self.assertTrue(result.data["cancelled"])
+        self.assertFalse(result.data["timed_out"])
         self.assertLess(result.data["duration_ms"], 7000)
 
     def test_large_stdout_and_stderr_are_drained_and_truncated(self) -> None:

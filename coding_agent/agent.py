@@ -30,6 +30,7 @@ class AgentStatus(str, Enum):
     PROTOCOL_ERROR = "protocol_error"
     CONTEXT_ERROR = "context_error"
     STALLED = "stalled"
+    CANCELLED = "cancelled"
 
 
 class AgentEventKind(str, Enum):
@@ -94,6 +95,7 @@ class Agent:
         observer: AgentObserver | None = None,
         context_window: ContextWindow | None = None,
         secrets: tuple[str, ...] = (),
+        stop_requested: Callable[[], bool] | None = None,
     ) -> None:
         if not system_prompt.strip():
             raise ValueError("system_prompt cannot be empty")
@@ -105,6 +107,7 @@ class Agent:
         self._observer = observer
         self._context_window = context_window or ContextWindow()
         self._secrets = normalized_secrets(secrets)
+        self._stop_requested = stop_requested
 
     def run(self, task: str) -> AgentResult:
         """Run until the model answers, an error occurs, or a limit is reached."""
@@ -121,6 +124,8 @@ class Agent:
         consecutive_identical_calls = 0
 
         for step in range(1, self._limits.max_steps + 1):
+            if self._should_stop():
+                return _cancelled_result(history, step - 1, tool_call_count)
             schemas = self._tools.schemas()
             try:
                 request_messages = self._context_window.build(history, schemas)
@@ -137,6 +142,8 @@ class Agent:
             try:
                 turn = self._model.complete(request_messages, schemas)
             except ModelError as error:
+                if self._should_stop():
+                    return _cancelled_result(history, step, tool_call_count)
                 return AgentResult(
                     status=AgentStatus.MODEL_ERROR,
                     final_text="",
@@ -145,6 +152,9 @@ class Agent:
                     tool_calls=tool_call_count,
                     error=redact_text(str(error), self._secrets),
                 )
+
+            if self._should_stop():
+                return _cancelled_result(history, step, tool_call_count)
 
             assistant = _redact_message(turn.message, self._secrets)
             if assistant.role != "assistant":
@@ -271,6 +281,8 @@ class Agent:
             )
 
             for call in assistant.tool_calls:
+                if self._should_stop():
+                    return _cancelled_result(history, step, tool_call_count)
                 self._emit(
                     AgentEvent(
                         kind=AgentEventKind.TOOL_CALL,
@@ -279,7 +291,11 @@ class Agent:
                     )
                 )
                 result = _redact_tool_result(
-                    self._tools.execute(call, self._approval_policy),
+                    self._tools.execute(
+                        call,
+                        self._approval_policy,
+                        self._should_stop,
+                    ),
                     self._secrets,
                 )
                 self._emit(
@@ -298,6 +314,8 @@ class Agent:
                     )
                 )
                 tool_call_count += 1
+                if self._should_stop():
+                    return _cancelled_result(history, step, tool_call_count)
 
         return AgentResult(
             status=AgentStatus.MAX_STEPS,
@@ -316,6 +334,30 @@ class Agent:
         except Exception:
             # Rendering progress must never change the agent's behavior.
             pass
+
+    def _should_stop(self) -> bool:
+        if self._stop_requested is None:
+            return False
+        try:
+            return bool(self._stop_requested())
+        except Exception:
+            # A broken UI callback must not crash the agent loop.
+            return False
+
+
+def _cancelled_result(
+    history: list[Message],
+    model_steps: int,
+    tool_calls: int,
+) -> AgentResult:
+    return AgentResult(
+        status=AgentStatus.CANCELLED,
+        final_text="",
+        history=tuple(history),
+        model_steps=model_steps,
+        tool_calls=tool_calls,
+        error="Run cancelled by user",
+    )
 
 
 def _finish_reason_error(reason: str | None, message: Message) -> str | None:

@@ -1,10 +1,21 @@
-%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "fontFamily": "Arial, sans-serif", "lineColor": "#64748b"}}}%%
+%%{init: {"theme": "base", "themeVariables": {"background": "#ffffff", "fontFamily": "Arial, sans-serif", "lineColor": "#667085"}}}%%
 flowchart TD
-  U["用户给出编程任务"] --> CLI["命令行入口"]
-  CLI --> LOOP["Agent 主循环"]
-  LOOP --> MODEL["大语言模型 API"]
-  MODEL -->|"文字或工具调用"| LOOP
+  U["用户给出编程任务"]
 
+  subgraph ENTRY["两种操作入口"]
+    direction LR
+    WEB["浏览器本地任务台<br/>看过程、审批、停止"]
+    CLI["命令行<br/>适合脚本和调试"]
+  end
+
+  U --> WEB & CLI
+  WEB <--> SERVER["仅监听 127.0.0.1 的工作台服务"]
+  SERVER <--> MANAGER["任务管理器<br/>状态、事件、审批、取消"]
+  MANAGER --> RUNTIME["共享运行时"]
+  CLI --> RUNTIME
+  RUNTIME --> LOOP["Agent 主循环"]
+
+  LOOP <--> |"文字或工具调用"| MODEL["大语言模型 API"]
   LOOP --> REG["本地工具注册表"]
   subgraph TOOLS["本地执行工具"]
     direction LR
@@ -15,16 +26,19 @@ flowchart TD
   REG --> READ & WRITE & CMD
   READ & WRITE & CMD --> RESULT["结构化执行结果"]
   RESULT --> LOOP
-
-  SAFE["安全护栏<br/>路径边界、人工审批、次数限制、密钥脱敏"] -.-> LOOP
-  SAFE -.-> REG
   LOOP --> DONE["任务完成并给出总结"]
 
-  classDef user fill:#e8f1ff,stroke:#2563eb,color:#172554;
-  classDef core fill:#ede9fe,stroke:#7c3aed,color:#2e1065;
-  classDef tool fill:#ecfdf5,stroke:#059669,color:#052e16;
-  classDef safety fill:#fff7ed,stroke:#ea580c,color:#431407;
+  SAFE["安全护栏<br/>工作区边界、逐项审批、次数限制、密钥脱敏"] -.-> SERVER
+  SAFE -.-> LOOP
+  SAFE -.-> REG
+
+  classDef user fill:#eff6ff,stroke:#2563eb,color:#1e3a5f;
+  classDef interface fill:#f8fafc,stroke:#64748b,color:#20242a;
+  classDef core fill:#eef4ff,stroke:#4f6b95,color:#20242a;
+  classDef tool fill:#ecfdf5,stroke:#16815d,color:#174536;
+  classDef safety fill:#fff8eb,stroke:#b7791f,color:#5f4317;
   class U,DONE user;
-  class CLI,LOOP,MODEL core;
+  class WEB,CLI interface;
+  class SERVER,MANAGER,RUNTIME,LOOP,MODEL core;
   class REG,READ,WRITE,CMD,RESULT tool;
   class SAFE safety;

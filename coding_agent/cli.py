@@ -11,7 +11,6 @@ from typing import Any
 
 from coding_agent import __version__
 from coding_agent.agent import (
-    Agent,
     AgentEvent,
     AgentEventKind,
     AgentLimits,
@@ -19,20 +18,14 @@ from coding_agent.agent import (
 )
 from coding_agent.config import ConfigurationError, Settings
 from coding_agent.context import ContextLimits, ContextWindow
-from coding_agent.model import RetryPolicy, RetryingModelClient
+from coding_agent.model import RetryPolicy
 from coding_agent.policy import (
     AllowAllPolicy,
     CallbackApprovalPolicy,
     ToolRisk,
 )
-from coding_agent.providers.openai_compatible import OpenAICompatibleClient
+from coding_agent.runtime import build_agent
 from coding_agent.session import SessionStore
-from coding_agent.tools import (
-    ToolRegistry,
-    create_command_tool,
-    create_read_only_tools,
-    create_write_tools,
-)
 from coding_agent.workspace import Workspace, WorkspaceError
 
 
@@ -115,6 +108,34 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DIRECTORY",
         help="Save a redacted JSONL transcript, optionally choosing its directory.",
     )
+
+    web = subparsers.add_parser(
+        "web",
+        help="Open the localhost-only browser workbench.",
+    )
+    web.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path("."),
+        help="Workspace directory visible to the agent (default: current directory).",
+    )
+    web.add_argument(
+        "--env-file",
+        type=Path,
+        default=Path(".env"),
+        help="Local dotenv file (default: .env).",
+    )
+    web.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Local TCP port (default: 8765; use 0 for an available port).",
+    )
+    web.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Start the server without opening a browser window.",
+    )
     return parser
 
 
@@ -130,6 +151,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _doctor(arguments.env_file)
     if arguments.command == "run":
         return _run(arguments)
+    if arguments.command == "web":
+        return _web(arguments)
     parser.error(f"Unknown command: {arguments.command}")
     return 2
 
@@ -180,11 +203,6 @@ def _run(arguments: argparse.Namespace) -> int:
         print(f"Setup error: {error}", file=sys.stderr)
         return 2
 
-    tools = ToolRegistry(
-        create_read_only_tools(workspace)
-        + create_write_tools(workspace)
-        + (create_command_tool(workspace, secrets=(settings.api_key,)),)
-    )
     if arguments.yes_all:
         print("Warning: automatically approving all writes and commands.")
         approval_policy = AllowAllPolicy()
@@ -194,18 +212,14 @@ def _run(arguments: argparse.Namespace) -> int:
     else:
         approval_policy = CallbackApprovalPolicy(_prompt_for_approval)
 
-    model = RetryingModelClient(
-        OpenAICompatibleClient(settings),
-        retry_policy,
-    )
-    agent = Agent(
-        model,
-        tools,
+    agent = build_agent(
+        settings,
+        workspace,
         limits=limits,
         approval_policy=approval_policy,
         observer=_print_event,
         context_window=context_window,
-        secrets=(settings.api_key,),
+        retry_policy=retry_policy,
     )
     try:
         result = agent.run(arguments.task)
@@ -232,6 +246,22 @@ def _run(arguments: argparse.Namespace) -> int:
     if result.error:
         print(result.error, file=sys.stderr)
     return 2
+
+
+def _web(arguments: argparse.Namespace) -> int:
+    try:
+        from coding_agent.web import serve_workbench
+
+        serve_workbench(
+            arguments.workspace,
+            arguments.env_file,
+            port=arguments.port,
+            open_browser=not arguments.no_open,
+        )
+    except (OSError, ValueError) as error:
+        print(f"Setup error: {error}", file=sys.stderr)
+        return 2
+    return 0
 
 
 def _prompt_for_approval(

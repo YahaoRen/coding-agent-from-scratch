@@ -22,6 +22,10 @@ htmlcov/
 # Agent runtime data
 .coding-agent/
 
+# Local browser-check artifacts
+.playwright-cli/
+output/playwright/
+
 # Editor and operating-system files
 .idea/
 .vscode/
