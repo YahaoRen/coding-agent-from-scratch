@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, cast
@@ -75,6 +76,7 @@ class OpenAICompatibleClient:
     ) -> None:
         self._settings = settings
         self._transport = transport or UrllibJsonTransport()
+        self._disable_thinking = _is_official_deepseek_v4(settings)
 
     def complete(
         self,
@@ -88,6 +90,10 @@ class OpenAICompatibleClient:
         if tools:
             payload["tools"] = list(tools)
             payload["tool_choice"] = "auto"
+        if self._disable_thinking:
+            # DeepSeek V4 enables thinking by default. Non-thinking mode keeps the
+            # standard tool-call message shape used by this compact adapter.
+            payload["thinking"] = {"type": "disabled"}
 
         response = self._transport.post_json(
             url=f"{self._settings.base_url}/chat/completions",
@@ -160,3 +166,13 @@ class OpenAICompatibleClient:
         if not isinstance(arguments, str):
             raise ModelProtocolError("Tool call arguments must be JSON text")
         return ToolCall(id=call_id, name=name, arguments=arguments)
+
+
+def _is_official_deepseek_v4(settings: Settings) -> bool:
+    """Use DeepSeek V4's simpler non-thinking tool-call protocol by default."""
+
+    try:
+        hostname = urllib.parse.urlparse(settings.base_url).hostname
+    except ValueError:
+        return False
+    return hostname == "api.deepseek.com" and settings.model.startswith("deepseek-v4-")

@@ -68,6 +68,7 @@ class OpenAICompatibleClientTests(unittest.TestCase):
             [{"role": "user", "content": "Hi"}],
         )
         self.assertNotIn("tools", transport.request["payload"])
+        self.assertNotIn("thinking", transport.request["payload"])
 
     def test_sends_tools_and_parses_function_call(self) -> None:
         client, transport = self.make_client(
@@ -141,6 +142,61 @@ class OpenAICompatibleClientTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ModelProtocolError, "no choices"):
             client.complete([Message(role="user", content="Hi")])
+
+    def test_disables_default_thinking_for_official_deepseek_v4(self) -> None:
+        settings = Settings(
+            api_key="test-secret",
+            base_url="https://api.deepseek.com",
+            model="deepseek-v4-flash",
+        )
+        transport = RecordingTransport(
+            {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "ready"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        )
+        client = OpenAICompatibleClient(settings, transport)
+        tools = [{"type": "function", "function": {"name": "read_file"}}]
+
+        client.complete([Message(role="user", content="Hi")], tools)
+
+        self.assertEqual(
+            transport.request["payload"]["thinking"],
+            {"type": "disabled"},
+        )
+        self.assertEqual(transport.request["payload"]["tools"], tools)
+
+    def test_deepseek_option_requires_both_official_host_and_v4_model(self) -> None:
+        cases = (
+            ("https://api.deepseek.com", "other-model"),
+            ("https://api.deepseek.com.example.test", "deepseek-v4-flash"),
+        )
+        response = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "ready"},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+
+        for base_url, model in cases:
+            with self.subTest(base_url=base_url, model=model):
+                settings = Settings(
+                    api_key="test-secret",
+                    base_url=base_url,
+                    model=model,
+                )
+                transport = RecordingTransport(response)
+                client = OpenAICompatibleClient(settings, transport)
+
+                client.complete([Message(role="user", content="Hi")])
+
+                self.assertNotIn("thinking", transport.request["payload"])
 
 
 if __name__ == "__main__":

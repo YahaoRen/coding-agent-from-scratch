@@ -40,6 +40,17 @@ CODING_AGENT_BASE_URL=兼容接口的/v1地址
 CODING_AGENT_MODEL=模型名称
 ```
 
+使用 DeepSeek V4 时可以直接填写：
+
+```text
+CODING_AGENT_API_KEY=你的DeepSeek密钥
+CODING_AGENT_BASE_URL=https://api.deepseek.com
+CODING_AGENT_MODEL=deepseek-v4-flash
+CODING_AGENT_REQUEST_TIMEOUT=120
+```
+
+连接 DeepSeek 官方 V4 接口时，客户端会自动关闭默认思考模式，继续使用容易理解、延迟更低的标准工具调用流程。这个兼容选项只会发送给官方 DeepSeek V4 地址，不会影响其他 OpenAI 兼容接口。
+
 检查配置（不会发送 API 请求）：
 
 ```powershell
